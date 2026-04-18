@@ -20,7 +20,10 @@
     "outDir": "./dist",
     "types": [
       "node"
-    ]
+    ],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
   },
   "include": [
     "src/**/*",
