@@ -1,5 +1,5 @@
 import { dirname, join } from "path";
-import { documentFrom } from "./utils";
+import { documentFrom } from "@/utils";
 
 export async function fromNavbar(
   baseUrl: URL,

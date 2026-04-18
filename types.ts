@@ -4,12 +4,12 @@ declare module "very-happy-dom" {
     innerHTML: string;
     outerHTML: string;
     textContent: string;
-    parentNode: VirtualElement;
+    parentNode: VirtualNode | null;
     removeChild(node: VirtualNode | VirtualElement | null): void;
   }
 
   interface VirtualNode {
-    parentNode: VirtualNode;
+    parentNode: VirtualNode | null;
     removeChild(node: VirtualNode | VirtualElement | null): void;
   }
 }

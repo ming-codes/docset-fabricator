@@ -1,4 +1,4 @@
-import { detachVirtualElement, documentFrom, stylesheetFrom } from "./utils";
+import { detachVirtualElement, documentFrom, stylesheetFrom } from "@/utils";
 import { generate, walk, type CssNode } from "css-tree";
 import { dirname, join, relative } from "path";
 import {

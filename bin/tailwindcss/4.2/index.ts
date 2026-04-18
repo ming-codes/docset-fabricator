@@ -1,7 +1,7 @@
-import { indexAt, scaffoldAt } from "./src/docset";
-import { archive } from "./src/archive";
-import { fromNavbar } from "./src/crawl";
-import { detachVirtualElement, documentFrom } from "./src/utils";
+import { indexAt, scaffoldAt } from "@/docset";
+import { archive } from "@/archive";
+import { fromNavbar } from "@/crawl";
+import { detachVirtualElement, documentFrom } from "@/utils";
 import { Glob, pathToFileURL, write } from "bun";
 import { join } from "path";
 import type { VirtualDocument } from "very-happy-dom";
@@ -36,7 +36,7 @@ async function processWebResources(output: string, name: string, root: string) {
     });
 
     tr.forEach((row) => {
-      const [cls, styl] = row.querySelectorAll("td").map((cell) => {
+      const [cls] = row.querySelectorAll("td").map((cell) => {
         return cell.textContent
           .trim()
           .replaceAll("&lt;", "<")

@@ -2,7 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "path";
 import { Glob, pathToFileURL, write } from "bun";
 import { Database } from "bun:sqlite";
-import { documentFrom } from "./utils";
+import { documentFrom } from "@/utils";
 import type { VirtualDocument } from "very-happy-dom";
 
 type DocsetMeta = {
