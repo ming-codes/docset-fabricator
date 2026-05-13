@@ -1,115 +1,128 @@
-import { indexAt, scaffoldAt } from "@/docset";
-import { archive } from "@/archive";
-import { fromNavbar } from "@/crawl";
-import { detachVirtualElement, documentFrom } from "@/utils";
-import { Glob, pathToFileURL, write } from "bun";
-import { join } from "path";
-import type { VirtualDocument } from "very-happy-dom";
+import { Docset } from "@/docset";
+import { guid, metaFrom } from "@/utils";
+import { findAll, type Url } from "css-tree";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-async function processWebResources(output: string, name: string, root: string) {
-  const docs = await scaffoldAt(output, name);
+const docset = new Docset("tailwindcss");
 
-  const input = new URL(root);
+await docset.clean();
 
-  const links = await fromNavbar(new URL(input.href));
+await docset.scaffold();
 
-  await archive(
-    links.filter((href) => href.pathname.startsWith(input.pathname)),
-    docs,
+// await docset.restore("0");
+
+await docset.crawl(async ({ navbar }) => {
+  const links = await navbar(new URL("https://tailwindcss.com/docs/"));
+
+  return links.slice(-2);
+});
+
+await docset.documents((document, file) => {
+  const url = new URL(document.location.href);
+
+  Array.from(document.querySelectorAll('link[rel="stylesheet"]'), (sheet) => {
+    const sheetFilePath = docset.resolveFile(
+      join(sheet.getAttribute("href")!, "content.css"),
+      file,
+    );
+
+    sheet.setAttribute(
+      "href",
+      decodeURIComponent(relative(dirname(url.href), sheetFilePath.href)),
+    );
+  });
+});
+
+await docset.stylesheets(async (ast, file) => {
+  const fontFaceAtRules = findAll(ast, (node) => {
+    return node.type === "Atrule" && node.name === "font-face";
+  });
+
+  const nodes = fontFaceAtRules.flatMap((ast) => {
+    return findAll(ast, (node) => {
+      return node.type === "Url" && !node.value.startsWith("data:");
+    });
+  });
+
+  await Promise.all(
+    nodes
+      .filter((node): node is Url => node.type === "Url")
+      .map(async (node) => {
+        const dirPath = fileURLToPath(
+          docset.resolveFile(node.value, new URL(dirname(file.href))),
+        );
+        const meta = await metaFrom(pathToFileURL(join(dirPath, "meta.json")));
+        const target = join(dirPath, `content.${meta.extname}`);
+
+        node.value = relative(dirname(fileURLToPath(file)), target);
+        // node.value = await base64EncodeFileContent(
+        //   pathToFileURL(target),
+        //   meta.mimeType,
+        // );
+      }),
   );
+});
 
-  await Array.fromAsync(new Glob("**/*.html").scan(docs), async (path) => {
-    const file = join(process.cwd(), docs, path);
-    const document = await documentFrom(pathToFileURL(file));
-
-    const tr = document.querySelectorAll("#quick-reference tbody tr");
-    const tbody = document.querySelectorAll("#quick-reference tbody");
-
-    const more = document
-      .querySelectorAll("#quick-reference button")
-      .find((btn) => btn.textContent.trim().toLowerCase() === "show more");
-
-    detachVirtualElement(more?.parentNode);
-
-    tbody.forEach((body) => {
-      body.removeAttribute("hidden");
-    });
-
-    tr.forEach((row) => {
-      const [cls] = row.querySelectorAll("td").map((cell) => {
-        return cell.textContent
-          .trim()
-          .replaceAll("&lt;", "<")
-          .replaceAll("&gt;", ">");
-      }) as [string, string];
-
-      row.setAttribute("id", cls);
-    });
-
-    await write(file, document.documentElement!.outerHTML);
+await docset.documents((document) => {
+  document.querySelectorAll('[rel="preload"], script').forEach((node) => {
+    node.remove();
   });
-}
 
-function processAsReference(document: VirtualDocument, path: string) {
-  const headings = document.querySelectorAll("h1,h2,h3,h4,h5,h6");
-  const h1 = headings.find(
-    (heading) => heading.tagName.toLowerCase() === "h1",
-  )!;
-  const tr = document.querySelectorAll("#quick-reference tbody tr");
-
-  index.insert(h1.textContent, "Property", path);
-
-  tr.forEach((row) => {
-    const [cls, styl] = row.querySelectorAll("td").map((cell) => {
-      return cell.textContent
-        .trim()
-        .replaceAll("&lt;", "<")
-        .replaceAll("&gt;", ">");
-    }) as [string, string];
-
-    index.insert(cls, "Value", `${path}#${encodeURIComponent(cls)}`);
-    index.insert(styl, "Value", `${path}#${encodeURIComponent(cls)}`);
+  document.querySelectorAll("h1,h2,h3,h4,h5,h6").forEach((node) => {
+    if (!node.id) {
+      node.id = `${node.textContent.trim().toLowerCase()}-${guid(document)}`;
+    }
   });
-}
 
-function processAsGuide(document: VirtualDocument, path: string) {
-  const headings = document.querySelectorAll("h1,h2,h3,h4,h5,h6");
-  const h1 = headings.find(
-    (heading) => heading.tagName.toLowerCase() === "h1",
-  )!;
-  // const tr = document.querySelectorAll("#quick-reference tbody tr");
+  document.querySelectorAll("#quick-reference tbody tr").forEach((node) => {
+    if (!node.id) {
+      node.id = `${node.querySelector("td")!.textContent.trim().toLowerCase()}-${guid(document)}`;
+    }
+  });
 
-  index.insert(h1.textContent, "Guide", path);
+  document.querySelectorAll("#quick-reference tbody").forEach((body) => {
+    body.removeAttribute("hidden");
+  });
+});
 
-  // tr.forEach((row) => {
-  //   const [cls, styl] = row.querySelectorAll("td").map((cell) => {
-  //     return cell.textContent
-  //       .trim()
-  //       .replaceAll("&lt;", "<")
-  //       .replaceAll("&gt;", ">");
-  //   }) as [string, string];
-  //
-  //   index.insert(cls, "Value", `${path}#${encodeURIComponent(cls)}`);
-  //   index.insert(styl, "Value", `${path}#${encodeURIComponent(cls)}`);
-  // });
-}
-
-await processWebResources(
-  "dist",
-  "tailwindcss",
-  "https://tailwindcss.com/docs/",
-);
-
-const index = indexAt("dist", "tailwindcss");
-
-await index.glob("**/*.html", (document, path) => {
+await docset.documents((document, _file, meta) => {
   const section = document.querySelector("[data-section]")?.textContent ?? "";
+  const h1 = document.querySelector("h1")!;
 
   if (
     ["getting started", "core concepts"].includes(section.trim().toLowerCase())
   ) {
-    processAsGuide(document, path);
+    docset.prepareSqlIndex((insert) => {
+      insert(h1.textContent, "Guide", `${meta.localContentPath}#${h1.id}`);
+    });
   } else {
-    processAsReference(document, path);
+    docset.prepareSqlIndex((insert) => {
+      const tr = document.querySelectorAll("#quick-reference tbody tr");
+
+      insert(h1.textContent, "Property", `${meta.localContentPath}#${h1.id}`);
+
+      tr.forEach((row) => {
+        const [cls, styl] = Array.from(row.querySelectorAll("td"), (cell) => {
+          return cell.textContent
+            .trim()
+            .replaceAll("&lt;", "<")
+            .replaceAll("&gt;", ">");
+        }) as [string, string];
+
+        insert(
+          cls,
+          "Value",
+          `${meta.localContentPath}#${encodeURIComponent(row.id)}`,
+        );
+        insert(
+          styl,
+          "Value",
+          `${meta.localContentPath}#${encodeURIComponent(row.id)}`,
+        );
+      });
+    });
   }
 });
+
+await docset.main();
