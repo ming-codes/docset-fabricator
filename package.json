@@ -6,7 +6,8 @@
     "start": "bun run src/index.ts",
     "dev": "bun --watch run src/index.ts",
     "build": "bun build src/index.ts --outdir=dist --target=bun",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "devDependencies": {
     "@types/bun": "latest",
@@ -18,8 +19,8 @@
   "dependencies": {
     "@types/css-tree": "^2.3.11",
     "css-tree": "^3.2.1",
+    "happy-dom": "20.6.2",
     "puppeteer": "^24.40.0",
-    "very-happy-dom": "^0.0.9",
     "yoctocolors": "^2.1.2"
   }
 }
