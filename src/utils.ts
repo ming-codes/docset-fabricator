@@ -2,6 +2,7 @@ import { Window } from "happy-dom";
 import { createHash } from "crypto";
 import { basename, dirname, extname, join } from "path";
 import { fileURLToPath, pathToFileURL } from "bun";
+import { parse, type CssNode } from "css-tree";
 
 export type Source = { origin: string; pathname: string };
 
@@ -118,6 +119,38 @@ export async function asyncFlatMapUniqueUrls(
       return [key, compress(value)];
     }),
   );
+}
+
+export async function parseStylesheet(response: Response): Promise<CssNode> {
+  return parse(await response.text());
+}
+
+export async function parseDocument(response: Response) {
+  const html = await response.text();
+  const url = new URL(response.url);
+
+  const { document, location } = new Window({
+    url: url.href,
+    settings: {
+      disableCSSFileLoading: true,
+      disableComputedStyleRendering: true,
+    },
+  });
+
+  document.open();
+  document.write(html);
+  document.close();
+
+  location.href = url.href;
+  location.protocol = url.protocol;
+  location.host = url.host;
+  location.hostname = url.hostname;
+  location.port = url.port;
+  location.pathname = url.pathname;
+  location.search = url.search;
+  location.hash = url.hash;
+
+  return document;
 }
 
 export async function documentFrom(url: URL) {

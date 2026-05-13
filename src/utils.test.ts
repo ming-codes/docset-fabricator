@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { asyncFlatMapUniqueUrls, hashFileName, hashURL } from "./utils";
+import { asyncFlatMapUniqueUrls, hashFileName, hashURL, parseDocument, parseStylesheet } from "./utils";
 
 describe("hashURL", () => {
   const source = { origin: "https://example.com", pathname: "/docs/a/b/c" };
@@ -87,6 +87,77 @@ describe("asyncFlatMapUniqueUrls", () => {
       return {};
     });
     expect(result).toEqual({});
+  });
+});
+
+describe("parseStylesheet", () => {
+  it("should parse css text into a CssNode AST", async () => {
+    const response = new Response("body { color: red; }", {
+      headers: { "Content-Type": "text/css" },
+    });
+    const ast = await parseStylesheet(response);
+    expect(ast.type).toBe("StyleSheet");
+  });
+
+  it("should parse an empty stylesheet", async () => {
+    const response = new Response("", {
+      headers: { "Content-Type": "text/css" },
+    });
+    const ast = await parseStylesheet(response);
+    expect(ast.type).toBe("StyleSheet");
+  });
+
+  it("should parse @font-face rules", async () => {
+    const css = `@font-face { font-family: "Test"; src: url("/fonts/test.woff2"); }`;
+    const response = new Response(css, {
+      headers: { "Content-Type": "text/css" },
+    });
+    const ast = await parseStylesheet(response);
+    expect(ast.type).toBe("StyleSheet");
+  });
+});
+
+function responseWithUrl(body: string, url: string): Response {
+  const response = new Response(body, { headers: { "Content-Type": "text/html" } });
+  Object.defineProperty(response, "url", { value: url });
+  return response;
+}
+
+describe("parseDocument", () => {
+  it("should return a document with the parsed HTML", async () => {
+    const doc = await parseDocument(
+      responseWithUrl(
+        `<html><head></head><body><h1>Hello</h1></body></html>`,
+        "https://example.com/page",
+      ),
+    );
+    expect(doc.querySelector("h1")?.textContent).toBe("Hello");
+  });
+
+  it("should set location from the response URL", async () => {
+    const doc = await parseDocument(
+      responseWithUrl(
+        `<html><body></body></html>`,
+        "https://example.com/docs/page?q=1#section",
+      ),
+    );
+    expect(doc.location.hostname).toBe("example.com");
+    expect(doc.location.pathname).toBe("/docs/page");
+    expect(doc.location.search).toBe("?q=1");
+    expect(doc.location.hash).toBe("#section");
+  });
+
+  it("should expose querySelectorAll on the returned document", async () => {
+    const doc = await parseDocument(
+      responseWithUrl(
+        `<html><body><a href="/a">A</a><a href="/b">B</a></body></html>`,
+        "https://example.com/",
+      ),
+    );
+    const links = Array.from(doc.querySelectorAll("a"));
+    expect(links).toHaveLength(2);
+    expect(links[0]?.getAttribute("href")).toBe("/a");
+    expect(links[1]?.getAttribute("href")).toBe("/b");
   });
 });
 
