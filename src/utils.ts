@@ -75,10 +75,7 @@ export async function asyncFlatMapUniqueUrls(
 ): Promise<Array<URL>>;
 export async function asyncFlatMapUniqueUrls<
   T extends Record<string, Array<URL>>,
->(
-  urls: Array<URL>,
-  callback: (url: URL) => Promise<T>,
-): Promise<T>;
+>(urls: Array<URL>, callback: (url: URL) => Promise<T>): Promise<T>;
 export async function asyncFlatMapUniqueUrls(
   urls: Array<URL>,
   callback: (
@@ -180,7 +177,3 @@ export async function documentFrom(url: URL) {
 
   return document;
 }
-
-
-
-

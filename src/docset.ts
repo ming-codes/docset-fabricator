@@ -2,14 +2,18 @@ import { join } from "path";
 import yoctocolors from "yoctocolors";
 import { Database } from "bun:sqlite";
 import { Document, Element, Location, Node, Window } from "happy-dom";
-import { fromNavbar } from "@/crawl";
 import { createWriteStream } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
-import { basename, dirname } from "node:path";
+import { basename, dirname, relative } from "node:path";
 import { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { findAll, parse, generate, type CssNode, type Url } from "css-tree";
-import { asyncFlatMapUniqueUrls, documentFrom, metaFrom, normalizeURL } from "./utils";
+import {
+  asyncFlatMapUniqueUrls,
+  documentFrom,
+  metaFrom,
+  normalizeURL,
+} from "./utils";
 import type { DocsetMeta, EntryType, FileMeta } from "./types";
 import { fileURLToPath, Glob, pathToFileURL, write } from "bun";
 import { cp } from "node:fs/promises";
@@ -53,7 +57,6 @@ export class Docset {
   public readonly family: string;
 
   private isClean = false;
-  private db?: Database;
 
   public constructor(meta: DocsetMeta | string, output = "dist") {
     this.id = typeof meta === "string" ? meta : meta.id;
@@ -92,6 +95,16 @@ export class Docset {
   //   // await cp(this.output, );
   // }
 
+  public toc(node: Element, type: EntryType, name: string = node.textContent) {
+    const anchor = node.ownerDocument.createElement("a");
+    const label = encodeURIComponent(name.trim().replace(/\s+/, " "));
+
+    anchor.setAttribute("name", `//apple_ref/cpp/${type}/${label}`);
+    anchor.setAttribute("class", "dashAnchor");
+
+    node.insertBefore(anchor, node.firstChild);
+  }
+
   public async scaffold() {
     if (!this.isClean) {
       throw new Error(
@@ -122,6 +135,8 @@ export class Docset {
       <string>${this.family}</string>
     	<key>isDashDocset</key>
     	<true/>
+      <key>DashDocSetFamily</key>
+      <string>dashtoc</string>
     </dict>
     </plist>`,
     );
@@ -141,7 +156,7 @@ export class Docset {
   }
 
   private extnameForMimeType(type: string | null): string {
-    if (!type) {
+    if (!type || type.startsWith("text/plain")) {
       return "txt";
     }
 
@@ -161,6 +176,18 @@ export class Docset {
       return "jpeg";
     }
 
+    if (type.startsWith("image/png")) {
+      return "png";
+    }
+
+    if (type.startsWith("image/svg+xml")) {
+      return "svg";
+    }
+
+    if (type.startsWith("image/vnd.microsoft.icon")) {
+      return "ico";
+    }
+
     throw new Error(type);
   }
 
@@ -168,6 +195,15 @@ export class Docset {
    * Low level API - resolve local relative path to absolute url
    */
   public resolveFile(href: string, source: URL | Location): URL {
+    const searchParams =
+      href.indexOf("?") > -1
+        ? Array.from(new URLSearchParams(href.slice(href.indexOf("?")))).flat(
+          10,
+        )
+        : [];
+    const trimmed =
+      href.indexOf("?") > -1 ? href.slice(0, href.indexOf("?")) : href;
+
     if (href.startsWith("file://")) {
       return new URL(href);
     } else if (href.startsWith("/")) {
@@ -176,10 +212,12 @@ export class Docset {
         fileURLToPath(new URL(source.href)).replace(documentsPath, "http:/"),
       );
 
-      return pathToFileURL(join(documentsPath, hostname, href));
+      return pathToFileURL(
+        join(documentsPath, hostname, trimmed, ...searchParams),
+      );
     }
 
-    return pathToFileURL(join(dirname(source.pathname), href));
+    return pathToFileURL(join(dirname(source.pathname), trimmed));
   }
 
   /**
@@ -206,16 +244,17 @@ export class Docset {
     source: URL,
     parser?: (response: Response) => Promise<T>,
   ): Promise<T | undefined> {
-    const response = await fetch(source);
+    const response = await fetch(source, {
+      signal: AbortSignal.timeout(5000),
+    });
     const contentType = response.headers.get("content-type")!;
     const mimeType = contentType.split(";").shift()!.trim();
     const extname = this.extnameForMimeType(contentType);
     const localPath = join(
-      ...[
-        source.host,
-        source.pathname,
-        Array.from(source.searchParams.entries()),
-      ].flat(10),
+      "/",
+      source.host,
+      source.pathname,
+      ...Array.from(source.searchParams.entries()).flat(10),
     );
     const localContentPath = join(localPath, `content.${extname}`);
     const target = join(this.output, "Contents/Resources/Documents", localPath);
@@ -238,7 +277,9 @@ export class Docset {
     );
 
     if (!response.ok) {
-      throw new Error(`Unexpected response ${response.statusText}`);
+      throw new Error(
+        `Unexpected response ${response.statusText}: ${source.href}`,
+      );
     }
 
     console.log(
@@ -264,11 +305,10 @@ export class Docset {
     );
   }
 
-  /**
-   * Crawl website for a list of documents to archive
-   */
-  public async crawl(
-    callback: (tools: { navbar: typeof fromNavbar }) => Promise<Array<URL>>,
+  private async archive(
+    callback: (tools: {
+      navbar: (baseUrl: URL, selector?: string) => Promise<Array<URL>>;
+    }) => Promise<Array<URL>>,
   ) {
     const links = await callback({
       async navbar(baseUrl: URL, selector = "nav"): Promise<Array<URL>> {
@@ -299,7 +339,7 @@ export class Docset {
       },
     });
 
-    const { stylesheets, images } = await asyncFlatMapUniqueUrls(
+    const { stylesheets, images, icons } = await asyncFlatMapUniqueUrls(
       links,
       async (url) => {
         const document = await this.download(url, parseDocument);
@@ -321,6 +361,11 @@ export class Docset {
               return [src, ...srcset]
                 .filter((src): src is string => Boolean(src))
                 .map((src) => this.resolveURL(src.trim(), url));
+            },
+          ),
+          icons: Array.from(document.querySelectorAll("[rel~='icon']")).flatMap(
+            (node) => {
+              return this.resolveURL(node.getAttribute("href")!, url);
             },
           ),
         };
@@ -350,10 +395,130 @@ export class Docset {
       ...fonts.map(async (url) => {
         await this.download(url);
       }),
-      ...images.map(async (url) => {
-        await this.download(url);
+      ...icons.flatMap(async (url) => {
+        try {
+          await this.download(url);
+        } catch (err) {
+          console.error(err);
+          return [];
+        }
+      }),
+      ...images.flatMap(async (url) => {
+        try {
+          await this.download(url);
+        } catch (err) {
+          console.error(err);
+          return [];
+        }
       }),
     ]);
+
+    console.log("Complete");
+  }
+
+  private async linkup() {
+    console.log("Linkup");
+
+    await this.documents(async (document, file, meta) => {
+      const url = new URL(document.location.href);
+
+      document.querySelectorAll('link[rel="stylesheet"]').forEach((sheet) => {
+        const sheetFilePath = this.resolveFile(
+          join(sheet.getAttribute("href")!, "content.css"),
+          file,
+        );
+
+        sheet.setAttribute(
+          "href",
+          decodeURIComponent(relative(dirname(url.href), sheetFilePath.href)),
+        );
+      });
+
+      await Promise.all(
+        Array.from(
+          document.querySelectorAll('link[rel~="icon"]'),
+          async (icon) => {
+            const meta = await metaFrom(
+              pathToFileURL(
+                join(
+                  fileURLToPath(
+                    this.resolveFile(icon.getAttribute("href")!, file),
+                  ),
+                  "content",
+                ),
+              ),
+            );
+
+            icon.setAttribute(
+              "href",
+              relative(
+                dirname(fileURLToPath(file)),
+                join(this.pathFor("documents"), meta.localContentPath),
+              ),
+            );
+          },
+        ),
+      );
+
+      document.querySelectorAll("a[href]").forEach((anchor) => {
+        const docFilePath = this.resolveFile(
+          join(anchor.getAttribute("href")!, "content.html"),
+          file,
+        );
+
+        anchor.setAttribute(
+          "href",
+          decodeURIComponent(relative(dirname(url.href), docFilePath.href)),
+        );
+      });
+    });
+
+    await this.stylesheets(async (ast, file) => {
+      const fontFaceAtRules = findAll(ast, (node) => {
+        return node.type === "Atrule" && node.name === "font-face";
+      });
+
+      const nodes = fontFaceAtRules.flatMap((ast) => {
+        return findAll(ast, (node) => {
+          return node.type === "Url" && !node.value.startsWith("data:");
+        });
+      });
+
+      await Promise.all(
+        nodes
+          .filter((node): node is Url => node.type === "Url")
+          .map(async (node) => {
+            const dirPath = fileURLToPath(
+              this.resolveFile(node.value, new URL(dirname(file.href))),
+            );
+            const meta = await metaFrom(
+              pathToFileURL(join(dirPath, "meta.json")),
+            );
+            const target = join(dirPath, `content.${meta.extname}`);
+
+            node.value = relative(dirname(fileURLToPath(file)), target);
+            // node.value = await base64EncodeFileContent(
+            //   pathToFileURL(target),
+            //   meta.mimeType,
+            // );
+          }),
+      );
+    });
+
+    console.log("Complete");
+  }
+
+  /**
+   * Crawl website for a list of documents to archive
+   */
+  public async crawl(
+    callback: (tools: {
+      navbar: (baseUrl: URL, selector?: string) => Promise<Array<URL>>;
+    }) => Promise<Array<URL>>,
+  ) {
+    await this.archive(callback);
+
+    await this.linkup();
   }
 
   /**
