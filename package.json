@@ -1,5 +1,5 @@
 {
-  "name": "dashset",
+  "name": "docset-fabricator",
   "type": "module",
   "private": true,
   "scripts": {
