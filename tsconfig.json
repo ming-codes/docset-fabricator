@@ -22,13 +22,14 @@
       "node"
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   "include": [
     "src/**/*",
-    "bin/**/*",
-    "types.ts"
+    "bin/**/*"
   ],
   "exclude": [
     "node_modules",
